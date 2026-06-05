@@ -94,3 +94,20 @@ Este MVP não detecta o contorno real da unha com precisão clínica. Ele usa os
 Este projeto já vem com `nixpacks.toml`, `.node-version` e `engines` no `package.json` para forçar Node 20 no Railway.
 
 Se o Railway ainda tentar usar Node 18, apague o serviço antigo e crie um novo deploy a partir do repositório atualizado, ou limpe o cache de build no Railway.
+
+## Correção Railway Host Bloqueado
+
+Se aparecer a mensagem `Blocked request. This host is not allowed`, o arquivo `vite.config.js` já inclui:
+
+```js
+preview: {
+  host: '0.0.0.0',
+  port: Number(process.env.PORT) || 4173,
+  allowedHosts: [
+    'nail-production-4336.up.railway.app',
+    '.up.railway.app'
+  ]
+}
+```
+
+Se o Railway gerar outro domínio, adicione esse domínio dentro de `allowedHosts` e faça novo deploy.
