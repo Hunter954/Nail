@@ -87,3 +87,10 @@ Este MVP não detecta o contorno real da unha com precisão clínica. Ele usa os
 - Ajuste manual de posição da unha
 - Segmentação real da unha com IA treinada
 - Login e agendamento integrado
+
+
+## Correção Railway / Node
+
+Este projeto já vem com `nixpacks.toml`, `.node-version` e `engines` no `package.json` para forçar Node 20 no Railway.
+
+Se o Railway ainda tentar usar Node 18, apague o serviço antigo e crie um novo deploy a partir do repositório atualizado, ou limpe o cache de build no Railway.
