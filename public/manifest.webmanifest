@@ -1,0 +1,17 @@
+{
+  "name": "Nail AR Studio",
+  "short_name": "Nail AR",
+  "description": "Teste cores e formatos de unhas em realidade aumentada.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#140814",
+  "theme_color": "#f65d9b",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
