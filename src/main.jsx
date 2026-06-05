@@ -36,12 +36,19 @@ const DESIGNS = [
 ];
 
 const FINGERS = [
-  { name: 'thumb', tip: 4, dip: 3, pip: 2, width: 0.9 },
-  { name: 'index', tip: 8, dip: 7, pip: 6, width: 0.72 },
-  { name: 'middle', tip: 12, dip: 11, pip: 10, width: 0.74 },
-  { name: 'ring', tip: 16, dip: 15, pip: 14, width: 0.7 },
-  { name: 'pinky', tip: 20, dip: 19, pip: 18, width: 0.62 }
+  { name: 'thumb', tip: 4, dip: 3, pip: 2, mcp: 1, width: 1.02, length: 0.86, offset: 0.31 },
+  { name: 'index', tip: 8, dip: 7, pip: 6, mcp: 5, width: 0.78, length: 1.0, offset: 0.34 },
+  { name: 'middle', tip: 12, dip: 11, pip: 10, mcp: 9, width: 0.82, length: 1.04, offset: 0.34 },
+  { name: 'ring', tip: 16, dip: 15, pip: 14, mcp: 13, width: 0.77, length: 0.98, offset: 0.34 },
+  { name: 'pinky', tip: 20, dip: 19, pip: 18, mcp: 17, width: 0.66, length: 0.9, offset: 0.34 }
 ];
+
+const GLITTER_POINTS = Array.from({ length: 18 }, (_, index) => ({
+  x: pseudoRandom(index * 31 + 3) - 0.5,
+  y: pseudoRandom(index * 47 + 9) - 0.5,
+  r: 0.7 + pseudoRandom(index * 19 + 11) * 1.4,
+  a: 0.45 + pseudoRandom(index * 13 + 4) * 0.45
+}));
 
 function App() {
   const videoRef = useRef(null);
@@ -49,6 +56,9 @@ function App() {
   const animationRef = useRef(null);
   const detectorRef = useRef(null);
   const lastVideoTimeRef = useRef(-1);
+  const smoothedLandmarksRef = useRef(null);
+  const statusRef = useRef({ text: '', at: 0 });
+  const settingsRef = useRef({ color: COLORS[1].value, shape: 'oval', design: 'solid', scale: 1, fit: 1, gloss: 0.85, depth: 0.75 });
 
   const [status, setStatus] = useState('Carregando IA da câmera...');
   const [cameraOn, setCameraOn] = useState(false);
@@ -56,11 +66,18 @@ function App() {
   const [shape, setShape] = useState('oval');
   const [design, setDesign] = useState('solid');
   const [scale, setScale] = useState(1);
+  const [fit, setFit] = useState(1);
+  const [gloss, setGloss] = useState(0.85);
+  const [depth, setDepth] = useState(0.75);
   const [facingMode, setFacingMode] = useState('environment');
   const [photoUrl, setPhotoUrl] = useState(null);
 
   const selectedShape = useMemo(() => SHAPES.find((item) => item.id === shape), [shape]);
   const selectedDesign = useMemo(() => DESIGNS.find((item) => item.id === design), [design]);
+
+  useEffect(() => {
+    settingsRef.current = { color: selectedColor.value, shape, design, scale, fit, gloss, depth };
+  }, [selectedColor, shape, design, scale, fit, gloss, depth]);
 
   useEffect(() => {
     let mounted = true;
@@ -75,9 +92,9 @@ function App() {
           },
           runningMode: 'VIDEO',
           numHands: 1,
-          minHandDetectionConfidence: 0.55,
-          minHandPresenceConfidence: 0.55,
-          minTrackingConfidence: 0.55
+          minHandDetectionConfidence: 0.62,
+          minHandPresenceConfidence: 0.62,
+          minTrackingConfidence: 0.62
         });
 
         if (!mounted) return;
@@ -101,7 +118,8 @@ function App() {
   async function startCamera(nextFacing = facingMode) {
     try {
       stopCamera(false);
-      setStatus('Abrindo câmera...');
+      smoothedLandmarksRef.current = null;
+      setSmartStatus('Abrindo câmera...', true);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -117,11 +135,11 @@ function App() {
       await video.play();
 
       setCameraOn(true);
-      setStatus('Coloque a mão aberta na frente da câmera.');
+      setSmartStatus('Coloque a mão aberta na frente da câmera.', true);
       renderLoop();
     } catch (error) {
       console.error(error);
-      setStatus('Permita o acesso à câmera para usar o provador. No celular precisa estar em HTTPS.');
+      setSmartStatus('Permita o acesso à câmera para usar o provador. No celular precisa estar em HTTPS.', true);
     }
   }
 
@@ -138,6 +156,14 @@ function App() {
     const next = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(next);
     await startCamera(next);
+  }
+
+  function setSmartStatus(text, force = false) {
+    const now = performance.now();
+    if (force || (statusRef.current.text !== text && now - statusRef.current.at > 650)) {
+      statusRef.current = { text, at: now };
+      setStatus(text);
+    }
   }
 
   function renderLoop() {
@@ -166,12 +192,14 @@ function App() {
       const result = detector.detectForVideo(video, performance.now());
 
       if (result.landmarks?.length) {
-        setStatus('Mão detectada. Escolha cor, formato e desenho.');
-        result.landmarks.forEach((landmarks) => {
-          drawNails(ctx, landmarks, width, height, selectedColor.value, shape, design, scale);
-        });
+        setSmartStatus('Mão detectada. Ajuste tamanho, encaixe, brilho e 3D.');
+        const rawLandmarks = result.landmarks[0];
+        const smooth = smoothLandmarks(smoothedLandmarksRef.current, rawLandmarks, 0.58);
+        smoothedLandmarksRef.current = smooth;
+        drawNails(ctx, smooth, width, height, settingsRef.current);
       } else {
-        setStatus('Aproxime a mão da câmera e deixe os dedos visíveis.');
+        smoothedLandmarksRef.current = null;
+        setSmartStatus('Aproxime a mão da câmera e deixe os dedos visíveis.');
       }
     }
 
@@ -274,10 +302,16 @@ function App() {
           </div>
         </div>
 
-        <div className="panel">
-          <h2>Tamanho</h2>
-          <input type="range" min="0.75" max="1.35" step="0.05" value={scale} onChange={(event) => setScale(Number(event.target.value))} />
-          <small>{Math.round(scale * 100)}%</small>
+        <div className="panel sliders-panel">
+          <h2>Ajuste fino</h2>
+          <label>Tamanho <strong>{Math.round(scale * 100)}%</strong></label>
+          <input type="range" min="0.72" max="1.45" step="0.01" value={scale} onChange={(event) => setScale(Number(event.target.value))} />
+          <label>Encaixe <strong>{Math.round(fit * 100)}%</strong></label>
+          <input type="range" min="0.75" max="1.28" step="0.01" value={fit} onChange={(event) => setFit(Number(event.target.value))} />
+          <label>Brilho <strong>{Math.round(gloss * 100)}%</strong></label>
+          <input type="range" min="0.15" max="1.15" step="0.01" value={gloss} onChange={(event) => setGloss(Number(event.target.value))} />
+          <label>3D <strong>{Math.round(depth * 100)}%</strong></label>
+          <input type="range" min="0.1" max="1.25" step="0.01" value={depth} onChange={(event) => setDepth(Number(event.target.value))} />
         </div>
       </section>
 
@@ -296,95 +330,191 @@ function App() {
   );
 }
 
-function drawNails(ctx, landmarks, width, height, color, shape, design, scale) {
+function drawNails(ctx, landmarks, width, height, settings) {
+  const points = landmarks.map((landmark) => point(landmark, width, height));
+  const palmSize = Math.max(40, distance(points[0], points[9]));
+
   FINGERS.forEach((finger) => {
-    const tip = point(landmarks[finger.tip], width, height);
-    const dip = point(landmarks[finger.dip], width, height);
-    const pip = point(landmarks[finger.pip], width, height);
+    const tip = points[finger.tip];
+    const dip = points[finger.dip];
+    const pip = points[finger.pip];
+    const mcp = points[finger.mcp];
 
-    const vx = tip.x - dip.x;
-    const vy = tip.y - dip.y;
-    const angle = Math.atan2(vy, vx) + Math.PI / 2;
-    const lengthBase = distance(pip, tip);
-    const nailLength = clamp(lengthBase * 0.54 * scale, 22, 76);
-    const nailWidth = clamp(lengthBase * 0.28 * finger.width * scale, 13, 35);
+    const axis = normalize({ x: tip.x - dip.x, y: tip.y - dip.y });
+    const segment = Math.max(distance(tip, dip), distance(dip, pip) * 0.74, palmSize * 0.17);
+    const fingerThickness = clamp(distance(pip, mcp) * 0.24, palmSize * 0.065, palmSize * 0.16);
 
+    const nailLength = clamp(segment * 1.18 * finger.length * settings.scale, palmSize * 0.18, palmSize * 0.48);
+    const nailWidth = clamp(fingerThickness * finger.width * settings.fit, palmSize * 0.072, palmSize * 0.19);
+
+    // Posiciona a unha sobre a falange distal: uma parte fica no dedo, outra passa suavemente da ponta.
     const center = {
-      x: tip.x + vx * 0.18,
-      y: tip.y + vy * 0.18
+      x: tip.x - axis.x * nailLength * finger.offset,
+      y: tip.y - axis.y * nailLength * finger.offset
     };
+
+    const angle = Math.atan2(axis.x, -axis.y);
+    const zTip = landmarks[finger.tip]?.z || 0;
+    const zDip = landmarks[finger.dip]?.z || 0;
+    const tilt = clamp((zDip - zTip) * 9, -0.42, 0.42);
 
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(angle);
-    drawNailShape(ctx, nailWidth, nailLength, shape, color, design);
+    ctx.transform(1 + Math.abs(tilt) * 0.08, tilt * 0.16, 0, 1, 0, 0);
+    drawNailShape(ctx, nailWidth, nailLength, settings.shape, settings.color, settings.design, settings.gloss, settings.depth, finger.name);
     ctx.restore();
   });
 }
 
-function drawNailShape(ctx, w, h, shape, color, design) {
-  ctx.shadowColor = 'rgba(0,0,0,0.28)';
-  ctx.shadowBlur = 12;
-  ctx.shadowOffsetY = 4;
+function drawNailShape(ctx, w, h, shape, color, design, gloss, depth, fingerName) {
+  const depthStrength = clamp(depth, 0, 1.35);
+  const glossStrength = clamp(gloss, 0, 1.25);
 
-  const gradient = ctx.createLinearGradient(-w, -h, w, h);
-  gradient.addColorStop(0, lighten(color, 0.34));
-  gradient.addColorStop(0.42, color);
-  gradient.addColorStop(1, darken(color, 0.24));
+  ctx.save();
 
-  ctx.beginPath();
+  // sombra de contato: dá sensação de a unha estar colada na mão, não flutuando.
+  ctx.shadowColor = `rgba(0,0,0,${0.18 + depthStrength * 0.18})`;
+  ctx.shadowBlur = 7 + depthStrength * 8;
+  ctx.shadowOffsetY = 1.5 + depthStrength * 3;
 
-  if (shape === 'square') {
-    roundedRect(ctx, -w / 2, -h / 2, w, h, Math.max(5, w * 0.22));
-  } else if (shape === 'stiletto') {
-    ctx.moveTo(0, -h / 2);
-    ctx.bezierCurveTo(w * 0.55, -h * 0.22, w * 0.44, h * 0.36, w * 0.12, h / 2);
-    ctx.bezierCurveTo(-w * 0.12, h / 2, -w * 0.44, h * 0.36, -w * 0.55, -h * 0.22);
-    ctx.closePath();
-  } else if (shape === 'almond') {
-    ctx.moveTo(0, -h / 2);
-    ctx.bezierCurveTo(w * 0.62, -h * 0.18, w * 0.46, h * 0.42, 0, h / 2);
-    ctx.bezierCurveTo(-w * 0.46, h * 0.42, -w * 0.62, -h * 0.18, 0, -h / 2);
-  } else {
-    ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-  }
+  makeNailPath(ctx, w, h, shape);
 
-  ctx.fillStyle = gradient;
-  ctx.globalAlpha = 0.88;
+  const vertical = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+  vertical.addColorStop(0, lighten(color, 0.24));
+  vertical.addColorStop(0.2, lighten(color, 0.08));
+  vertical.addColorStop(0.58, color);
+  vertical.addColorStop(1, darken(color, 0.18));
+
+  ctx.globalAlpha = 0.94;
+  ctx.fillStyle = vertical;
   ctx.fill();
   ctx.globalAlpha = 1;
 
   ctx.shadowColor = 'transparent';
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+
+  // volume lateral em 3D, simulando curvatura de unha com centro mais iluminado.
+  ctx.save();
+  makeNailPath(ctx, w, h, shape);
+  ctx.clip();
+
+  const sideShade = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+  sideShade.addColorStop(0, `rgba(0,0,0,${0.18 * depthStrength})`);
+  sideShade.addColorStop(0.22, `rgba(255,255,255,${0.08 * depthStrength})`);
+  sideShade.addColorStop(0.5, `rgba(255,255,255,${0.19 * depthStrength})`);
+  sideShade.addColorStop(0.78, `rgba(255,255,255,${0.06 * depthStrength})`);
+  sideShade.addColorStop(1, `rgba(0,0,0,${0.22 * depthStrength})`);
+  ctx.fillStyle = sideShade;
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+
+  const topGlow = ctx.createRadialGradient(-w * 0.18, -h * 0.24, 1, -w * 0.18, -h * 0.24, h * 0.7);
+  topGlow.addColorStop(0, `rgba(255,255,255,${0.28 * glossStrength})`);
+  topGlow.addColorStop(0.42, `rgba(255,255,255,${0.08 * glossStrength})`);
+  topGlow.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = topGlow;
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+
+  drawGloss(ctx, w, h, glossStrength, fingerName);
+
+  if (design === 'french') drawFrench(ctx, w, h, shape);
+  if (design === 'glitter') drawGlitter(ctx, w, h);
+  if (design === 'heart') drawHeart(ctx, 0, -h * 0.03, Math.max(4, w * 0.17));
+
+  ctx.restore();
+
+  // borda inferior mais escura e borda superior suave, como esmalte real.
+  makeNailPath(ctx, w, h, shape);
+  ctx.lineWidth = Math.max(0.9, w * 0.045);
+  ctx.strokeStyle = `rgba(255,255,255,${0.2 + glossStrength * 0.18})`;
   ctx.stroke();
 
+  makeNailPath(ctx, w * 0.94, h * 0.96, shape);
+  ctx.lineWidth = Math.max(0.6, w * 0.018);
+  ctx.strokeStyle = `rgba(0,0,0,${0.12 * depthStrength})`;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function makeNailPath(ctx, w, h, shape) {
   ctx.beginPath();
-  ctx.ellipse(-w * 0.15, -h * 0.18, Math.max(2, w * 0.08), Math.max(8, h * 0.26), -0.35, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.34)';
+
+  if (shape === 'square') {
+    roundedRect(ctx, -w / 2, -h / 2, w, h, Math.max(4, w * 0.24));
+  } else if (shape === 'stiletto') {
+    ctx.moveTo(0, -h / 2);
+    ctx.bezierCurveTo(w * 0.58, -h * 0.26, w * 0.5, h * 0.32, w * 0.18, h / 2);
+    ctx.bezierCurveTo(w * 0.05, h * 0.56, -w * 0.05, h * 0.56, -w * 0.18, h / 2);
+    ctx.bezierCurveTo(-w * 0.5, h * 0.32, -w * 0.58, -h * 0.26, 0, -h / 2);
+    ctx.closePath();
+  } else if (shape === 'almond') {
+    ctx.moveTo(0, -h / 2);
+    ctx.bezierCurveTo(w * 0.55, -h * 0.2, w * 0.48, h * 0.34, w * 0.12, h / 2);
+    ctx.bezierCurveTo(w * 0.04, h * 0.54, -w * 0.04, h * 0.54, -w * 0.12, h / 2);
+    ctx.bezierCurveTo(-w * 0.48, h * 0.34, -w * 0.55, -h * 0.2, 0, -h / 2);
+    ctx.closePath();
+  } else {
+    ctx.moveTo(0, -h / 2);
+    ctx.bezierCurveTo(w * 0.45, -h * 0.48, w * 0.56, -h * 0.1, w * 0.45, h * 0.26);
+    ctx.bezierCurveTo(w * 0.34, h * 0.5, -w * 0.34, h * 0.5, -w * 0.45, h * 0.26);
+    ctx.bezierCurveTo(-w * 0.56, -h * 0.1, -w * 0.45, -h * 0.48, 0, -h / 2);
+    ctx.closePath();
+  }
+}
+
+function drawGloss(ctx, w, h, strength, fingerName) {
+  if (strength <= 0.05) return;
+
+  const xShift = fingerName === 'thumb' ? -w * 0.02 : -w * 0.14;
+  ctx.save();
+  ctx.translate(xShift, -h * 0.08);
+  ctx.rotate(-0.18);
+
+  const gloss = ctx.createLinearGradient(-w * 0.1, -h * 0.35, w * 0.18, h * 0.34);
+  gloss.addColorStop(0, 'rgba(255,255,255,0)');
+  gloss.addColorStop(0.22, `rgba(255,255,255,${0.38 * strength})`);
+  gloss.addColorStop(0.52, `rgba(255,255,255,${0.12 * strength})`);
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+
+  ctx.beginPath();
+  ctx.ellipse(0, 0, Math.max(2.5, w * 0.105), Math.max(8, h * 0.42), 0, 0, Math.PI * 2);
+  ctx.fillStyle = gloss;
   ctx.fill();
 
-  if (design === 'french') {
+  ctx.beginPath();
+  ctx.ellipse(w * 0.16, -h * 0.22, Math.max(1.3, w * 0.045), Math.max(4, h * 0.16), 0.08, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255,255,255,${0.28 * strength})`;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawFrench(ctx, w, h, shape) {
+  ctx.save();
+  makeNailPath(ctx, w, h, shape);
+  ctx.clip();
+
+  ctx.beginPath();
+  ctx.ellipse(0, -h * 0.39, w * 0.52, h * 0.18, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.ellipse(0, -h * 0.29, w * 0.44, h * 0.1, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.36)';
+  ctx.lineWidth = Math.max(0.6, w * 0.025);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGlitter(ctx, w, h) {
+  GLITTER_POINTS.forEach((dot) => {
+    const x = dot.x * w * 0.72;
+    const y = dot.y * h * 0.72;
     ctx.beginPath();
-    ctx.ellipse(0, -h * 0.32, w * 0.48, h * 0.2, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.arc(x, y, dot.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${dot.a})`;
     ctx.fill();
-  }
-
-  if (design === 'glitter') {
-    for (let i = 0; i < 14; i += 1) {
-      const x = (Math.random() - 0.5) * w * 0.75;
-      const y = (Math.random() - 0.5) * h * 0.75;
-      ctx.beginPath();
-      ctx.arc(x, y, Math.random() * 1.7 + 0.7, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
-      ctx.fill();
-    }
-  }
-
-  if (design === 'heart') {
-    drawHeart(ctx, 0, -h * 0.05, Math.max(4, w * 0.16));
-  }
+  });
 }
 
 function roundedRect(ctx, x, y, w, h, r) {
@@ -392,7 +522,7 @@ function roundedRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x + w, y, x + w, y + h, r);
   ctx.arcTo(x + w, y + h, x, y + h, r);
   ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
+  ctx.arcTo(x, y, x + r, y, r);
   ctx.closePath();
 }
 
@@ -403,17 +533,31 @@ function drawHeart(ctx, x, y, size) {
   ctx.moveTo(0, size * 0.4);
   ctx.bezierCurveTo(-size, -size * 0.25, -size * 0.55, -size, 0, -size * 0.4);
   ctx.bezierCurveTo(size * 0.55, -size, size, -size * 0.25, 0, size * 0.4);
-  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
   ctx.fill();
   ctx.restore();
 }
 
 function point(landmark, width, height) {
-  return { x: landmark.x * width, y: landmark.y * height };
+  return { x: landmark.x * width, y: landmark.y * height, z: landmark.z || 0 };
+}
+
+function smoothLandmarks(previous, current, alpha = 0.58) {
+  if (!previous) return current.map((item) => ({ ...item }));
+  return current.map((item, index) => ({
+    x: previous[index].x * (1 - alpha) + item.x * alpha,
+    y: previous[index].y * (1 - alpha) + item.y * alpha,
+    z: (previous[index].z || 0) * (1 - alpha) + (item.z || 0) * alpha
+  }));
 }
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function normalize(vector) {
+  const len = Math.hypot(vector.x, vector.y) || 1;
+  return { x: vector.x / len, y: vector.y / len };
 }
 
 function clamp(value, min, max) {
@@ -438,6 +582,11 @@ function lighten(hex, amount) {
 function darken(hex, amount) {
   const rgb = hexToRgb(hex);
   return rgbToHex({ r: rgb.r * (1 - amount), g: rgb.g * (1 - amount), b: rgb.b * (1 - amount) });
+}
+
+function pseudoRandom(seed) {
+  const x = Math.sin(seed * 999.17) * 10000;
+  return x - Math.floor(x);
 }
 
 createRoot(document.getElementById('root')).render(<App />);

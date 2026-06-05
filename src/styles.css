@@ -249,3 +249,20 @@ input[type="range"] {
   .controls { grid-template-columns: 1.2fr 1fr 1fr .8fr; }
   .whatsapp { left: auto; right: 24px; width: 330px; }
 }
+
+.sliders-panel label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 6px;
+  color: rgba(255,255,255,.8);
+  font-size: 13px;
+}
+
+.sliders-panel label:first-of-type { margin-top: 0; }
+
+.sliders-panel strong {
+  color: #ffd4e6;
+  font-size: 12px;
+}
