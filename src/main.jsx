@@ -38,11 +38,11 @@ const DESIGNS = [
 const FINGERS = [
   // calibragem mais realista: a unha fica presa entre o DIP e a ponta do dedo.
   // widthRatio usa a largura estimada do dedo; lengthRatio usa a falange distal real.
-  { name: 'thumb', label: 'Polegar', tip: 4, dip: 3, pip: 2, mcp: 1, widthRatio: 0.72, lengthRatio: 0.82, forward: 0.05, base: 0.42, min: 0.13, max: 0.36 },
-  { name: 'index', label: 'Indicador', tip: 8, dip: 7, pip: 6, mcp: 5, widthRatio: 0.58, lengthRatio: 0.78, forward: 0.06, base: 0.40, min: 0.12, max: 0.34 },
-  { name: 'middle', label: 'Médio', tip: 12, dip: 11, pip: 10, mcp: 9, widthRatio: 0.60, lengthRatio: 0.80, forward: 0.06, base: 0.40, min: 0.12, max: 0.35 },
-  { name: 'ring', label: 'Anelar', tip: 16, dip: 15, pip: 14, mcp: 13, widthRatio: 0.57, lengthRatio: 0.77, forward: 0.06, base: 0.40, min: 0.11, max: 0.33 },
-  { name: 'pinky', label: 'Mindinho', tip: 20, dip: 19, pip: 18, mcp: 17, widthRatio: 0.52, lengthRatio: 0.72, forward: 0.05, base: 0.39, min: 0.095, max: 0.29 }
+  { name: 'thumb', label: 'Polegar', tip: 4, dip: 3, pip: 2, mcp: 1, widthRatio: 0.66, lengthRatio: 0.72, forward: 0.03, base: 0.42, min: 0.11, max: 0.31 },
+  { name: 'index', label: 'Indicador', tip: 8, dip: 7, pip: 6, mcp: 5, widthRatio: 0.52, lengthRatio: 0.68, forward: 0.025, base: 0.40, min: 0.10, max: 0.29 },
+  { name: 'middle', label: 'Médio', tip: 12, dip: 11, pip: 10, mcp: 9, widthRatio: 0.54, lengthRatio: 0.69, forward: 0.025, base: 0.40, min: 0.10, max: 0.30 },
+  { name: 'ring', label: 'Anelar', tip: 16, dip: 15, pip: 14, mcp: 13, widthRatio: 0.51, lengthRatio: 0.67, forward: 0.025, base: 0.40, min: 0.095, max: 0.28 },
+  { name: 'pinky', label: 'Mindinho', tip: 20, dip: 19, pip: 18, mcp: 17, widthRatio: 0.46, lengthRatio: 0.62, forward: 0.02, base: 0.39, min: 0.08, max: 0.24 }
 ];
 
 const GLITTER_POINTS = Array.from({ length: 18 }, (_, index) => ({
@@ -60,17 +60,17 @@ function App() {
   const lastVideoTimeRef = useRef(-1);
   const smoothedLandmarksRef = useRef(null);
   const statusRef = useRef({ text: '', at: 0 });
-  const settingsRef = useRef({ color: COLORS[1].value, shape: 'oval', design: 'solid', scale: 1, fit: 1, gloss: 0.85, depth: 0.75 });
+  const settingsRef = useRef({ color: COLORS[1].value, shape: 'oval', design: 'solid', scale: 0.92, fit: 0.88, gloss: 0.78, depth: 1.05 });
 
   const [status, setStatus] = useState('Carregando IA da câmera...');
   const [cameraOn, setCameraOn] = useState(false);
   const [selectedColor, setSelectedColor] = useState(COLORS[1]);
   const [shape, setShape] = useState('oval');
   const [design, setDesign] = useState('solid');
-  const [scale, setScale] = useState(1);
-  const [fit, setFit] = useState(1);
-  const [gloss, setGloss] = useState(0.85);
-  const [depth, setDepth] = useState(0.75);
+  const [scale, setScale] = useState(0.92);
+  const [fit, setFit] = useState(0.88);
+  const [gloss, setGloss] = useState(0.78);
+  const [depth, setDepth] = useState(1.05);
   const [facingMode, setFacingMode] = useState('environment');
   const [photoUrl, setPhotoUrl] = useState(null);
 
@@ -354,10 +354,10 @@ function drawNails(ctx, landmarks, width, height, settings) {
     const fingerLen = Math.max(distance(tip, mcp), palmSize * 0.22);
 
     // Width estimate: blend distal and proximal info so the base doesn't get unnaturally thin.
-    const widthFromDistal = midLen * 0.53;
-    const widthFromProximal = proximalLen * 0.40;
-    const widthFromPalm = palmSize * finger.widthRatio * 0.22;
-    const rawFingerWidth = widthFromDistal * 0.42 + widthFromProximal * 0.24 + widthFromPalm * 0.34;
+    const widthFromDistal = midLen * 0.48;
+    const widthFromProximal = proximalLen * 0.34;
+    const widthFromPalm = palmSize * finger.widthRatio * 0.20;
+    const rawFingerWidth = widthFromDistal * 0.46 + widthFromProximal * 0.22 + widthFromPalm * 0.32;
 
     const nailLength = clamp(
       distalLen * finger.lengthRatio * settings.scale,
@@ -367,21 +367,21 @@ function drawNails(ctx, landmarks, width, height, settings) {
 
     const bodyWidth = clamp(
       rawFingerWidth * settings.fit,
-      nailLength * 0.46,
-      nailLength * 0.84
+      nailLength * 0.44,
+      nailLength * 0.76
     );
 
     const profile = getNailProfile(finger.name, settings.shape, bodyWidth, nailLength, settings.fit);
 
     // Anchor the nail by the cuticle instead of the center. This keeps the base sitting inside the finger better.
     const cuticleAnchor = {
-      x: tip.x - axis.x * nailLength * 0.60 + axis.x * nailLength * finger.forward,
-      y: tip.y - axis.y * nailLength * 0.60 + axis.y * nailLength * finger.forward
+      x: tip.x - axis.x * nailLength * 0.54 + axis.x * nailLength * finger.forward,
+      y: tip.y - axis.y * nailLength * 0.54 + axis.y * nailLength * finger.forward
     };
 
     let center = {
-      x: cuticleAnchor.x - axis.x * (nailLength * 0.10),
-      y: cuticleAnchor.y - axis.y * (nailLength * 0.10)
+      x: cuticleAnchor.x - axis.x * (nailLength * 0.04),
+      y: cuticleAnchor.y - axis.y * (nailLength * 0.04)
     };
 
     const zTip = landmarks[finger.tip]?.z || 0;
@@ -392,15 +392,15 @@ function drawNails(ctx, landmarks, width, height, settings) {
     // Thumb needs much stronger perspective correction because it often points sideways.
     const thumbYaw = finger.name === 'thumb' ? clamp(Math.abs(axis.x) * 1.08 + Math.abs(tilt) * 0.8, 0, 1) : 0;
     const widthPerspective = finger.name === 'thumb'
-      ? clamp(1 - thumbYaw * 0.48, 0.54, 1.02)
+      ? clamp(1 - thumbYaw * 0.58, 0.46, 1.02)
       : clamp(1 - Math.abs(tilt) * 0.12, 0.84, 1.04);
     const heightPerspective = finger.name === 'thumb'
       ? clamp(1 - Math.abs(tilt) * 0.18 + thumbYaw * 0.06, 0.82, 1.08)
       : clamp(1 - Math.abs(tilt) * 0.34, 0.84, 1.04);
     const shear = finger.name === 'thumb'
-      ? -Math.sign(axis.x || 1) * thumbYaw * 0.34 + tilt * 0.08
+      ? -Math.sign(axis.x || 1) * thumbYaw * 0.48 + tilt * 0.10
       : tilt * 0.13;
-    const rotationBoost = finger.name === 'thumb' ? Math.sign(axis.x || 1) * thumbYaw * 0.16 : 0;
+    const rotationBoost = finger.name === 'thumb' ? Math.sign(axis.x || 1) * thumbYaw * 0.25 : 0;
 
     if (finger.name === 'thumb') {
       center.x += side.x * profile.baseW * 0.10;
@@ -426,26 +426,26 @@ function getNailProfile(fingerName, shape, bodyWidth, length, fit) {
   const thumbBoost = fingerName === 'thumb' ? 1.04 : 1;
   const maxBase = length * (fingerName === 'thumb' ? 0.92 : 0.88);
 
-  let baseRatio = 1.14 + fitBonus;
-  let shoulderRatio = 1.01 + fitBonus * 0.35;
-  let tipRatio = 0.76;
+  let baseRatio = 1.02 + fitBonus;
+  let shoulderRatio = 1.06 + fitBonus * 0.30;
+  let tipRatio = 0.72;
 
   if (shape === 'square') {
-    baseRatio = 1.12 + fitBonus;
-    shoulderRatio = 1.04 + fitBonus * 0.30;
-    tipRatio = 0.98;
+    baseRatio = 1.00 + fitBonus;
+    shoulderRatio = 1.05 + fitBonus * 0.25;
+    tipRatio = 0.92;
   } else if (shape === 'almond') {
-    baseRatio = 1.17 + fitBonus;
-    shoulderRatio = 0.98 + fitBonus * 0.25;
-    tipRatio = 0.58;
+    baseRatio = 1.03 + fitBonus;
+    shoulderRatio = 1.03 + fitBonus * 0.22;
+    tipRatio = 0.52;
   } else if (shape === 'stiletto') {
-    baseRatio = 1.18 + fitBonus;
-    shoulderRatio = 0.88 + fitBonus * 0.20;
-    tipRatio = 0.24;
+    baseRatio = 1.04 + fitBonus;
+    shoulderRatio = 0.92 + fitBonus * 0.18;
+    tipRatio = 0.20;
   }
 
-  const baseW = clamp(bodyWidth * baseRatio * thumbBoost, length * 0.50, maxBase);
-  const shoulderW = clamp(bodyWidth * shoulderRatio, length * 0.44, baseW * 0.98);
+  const baseW = clamp(bodyWidth * baseRatio * thumbBoost, length * 0.44, maxBase);
+  const shoulderW = clamp(bodyWidth * shoulderRatio, length * 0.42, baseW * 1.10);
   const tipW = clamp(baseW * tipRatio, length * 0.12, shape === 'square' ? baseW * 0.98 : baseW * 0.88);
 
   return { shape, length, baseW, shoulderW, tipW };
@@ -483,7 +483,7 @@ function drawRealisticNail(ctx, profile, color, design, gloss, depth, fingerName
   vertical.addColorStop(0.58, color);
   vertical.addColorStop(0.84, darken(color, 0.08));
   vertical.addColorStop(1, darken(color, 0.2));
-  ctx.globalAlpha = 0.97;
+  ctx.globalAlpha = 0.90;
   ctx.fillStyle = vertical;
   ctx.fillRect(-maxW, -h / 2, maxW * 2, h);
   ctx.globalAlpha = 1;
@@ -509,8 +509,8 @@ function drawRealisticNail(ctx, profile, color, design, gloss, depth, fingerName
   // Blend the base into the skin a bit more.
   const cuticleFade = ctx.createLinearGradient(0, h * 0.16, 0, h / 2);
   cuticleFade.addColorStop(0, 'rgba(255,255,255,0)');
-  cuticleFade.addColorStop(0.48, 'rgba(255,255,255,0.06)');
-  cuticleFade.addColorStop(1, 'rgba(255,255,255,0.17)');
+  cuticleFade.addColorStop(0.36, 'rgba(255,255,255,0.035)');
+  cuticleFade.addColorStop(1, 'rgba(255,255,255,0.10)');
   ctx.fillStyle = cuticleFade;
   ctx.fillRect(-maxW, h * 0.12, maxW * 2, h * 0.42);
 
