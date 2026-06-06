@@ -332,10 +332,10 @@ function App() {
   );
 }
 
+
 function drawNails(ctx, landmarks, width, height, settings) {
   const points = landmarks.map((landmark) => point(landmark, width, height));
   const palmSize = Math.max(40, distance(points[0], points[9]));
-  const handednessMirror = 1;
 
   FINGERS.forEach((finger) => {
     const tip = points[finger.tip];
@@ -343,240 +343,308 @@ function drawNails(ctx, landmarks, width, height, settings) {
     const pip = points[finger.pip];
     const mcp = points[finger.mcp];
 
-    // Direção real da ponta do dedo. Mistura DIP->TIP com PIP->TIP para evitar unha torta quando o landmark treme.
     const distalAxis = normalize({ x: tip.x - dip.x, y: tip.y - dip.y });
     const longAxis = normalize({ x: tip.x - pip.x, y: tip.y - pip.y });
-    const axis = normalize({ x: distalAxis.x * 0.72 + longAxis.x * 0.28, y: distalAxis.y * 0.72 + longAxis.y * 0.28 });
-    const side = { x: -axis.y * handednessMirror, y: axis.x * handednessMirror };
+    const axis = normalize({ x: distalAxis.x * 0.78 + longAxis.x * 0.22, y: distalAxis.y * 0.78 + longAxis.y * 0.22 });
+    const side = { x: -axis.y, y: axis.x };
 
     const distalLen = Math.max(distance(tip, dip), palmSize * 0.095);
     const midLen = Math.max(distance(dip, pip), palmSize * 0.1);
+    const proximalLen = Math.max(distance(pip, mcp), palmSize * 0.1);
     const fingerLen = Math.max(distance(tip, mcp), palmSize * 0.22);
 
-    // Largura estimada pelo tamanho do dedo e palm scale. Isso encaixa melhor que usar só palmSize.
-    const widthFromJoints = Math.min(midLen * 0.54, fingerLen * 0.14);
+    // Width estimate: blend distal and proximal info so the base doesn't get unnaturally thin.
+    const widthFromDistal = midLen * 0.53;
+    const widthFromProximal = proximalLen * 0.40;
     const widthFromPalm = palmSize * finger.widthRatio * 0.22;
-    const rawFingerWidth = (widthFromJoints * 0.64 + widthFromPalm * 0.36);
+    const rawFingerWidth = widthFromDistal * 0.42 + widthFromProximal * 0.24 + widthFromPalm * 0.34;
 
     const nailLength = clamp(
       distalLen * finger.lengthRatio * settings.scale,
       palmSize * finger.min,
       palmSize * finger.max
     );
-    const nailWidth = clamp(
+
+    const bodyWidth = clamp(
       rawFingerWidth * settings.fit,
-      nailLength * 0.42,
-      nailLength * 0.72
+      nailLength * 0.46,
+      nailLength * 0.84
     );
 
-    // Posição: a ponta da unha passa só um pouco da ponta do dedo; a base entra na cutícula.
-    const center = {
-      x: tip.x + axis.x * nailLength * finger.forward - axis.x * nailLength * finger.base,
-      y: tip.y + axis.y * nailLength * finger.forward - axis.y * nailLength * finger.base
+    const profile = getNailProfile(finger.name, settings.shape, bodyWidth, nailLength, settings.fit);
+
+    // Anchor the nail by the cuticle instead of the center. This keeps the base sitting inside the finger better.
+    const cuticleAnchor = {
+      x: tip.x - axis.x * nailLength * 0.60 + axis.x * nailLength * finger.forward,
+      y: tip.y - axis.y * nailLength * 0.60 + axis.y * nailLength * finger.forward
     };
 
-    // Ajuste do polegar: polegar tem perspectiva bem diferente e costuma ficar rotacionado.
-    if (finger.name === 'thumb') {
-      center.x += side.x * nailWidth * 0.08;
-      center.y += side.y * nailWidth * 0.08;
-    }
+    let center = {
+      x: cuticleAnchor.x - axis.x * (nailLength * 0.10),
+      y: cuticleAnchor.y - axis.y * (nailLength * 0.10)
+    };
 
-    const angle = Math.atan2(axis.x, -axis.y);
     const zTip = landmarks[finger.tip]?.z || 0;
     const zDip = landmarks[finger.dip]?.z || 0;
     const zPip = landmarks[finger.pip]?.z || 0;
-    const tilt = clamp((zDip - zTip) * 8 + (zPip - zDip) * 3, -0.38, 0.38);
-    const foreshorten = clamp(1 - Math.abs(tilt) * 0.42, 0.82, 1.04);
+    const tilt = clamp((zDip - zTip) * 8 + (zPip - zDip) * 2.5, -0.42, 0.42);
+
+    // Thumb needs much stronger perspective correction because it often points sideways.
+    const thumbYaw = finger.name === 'thumb' ? clamp(Math.abs(axis.x) * 1.08 + Math.abs(tilt) * 0.8, 0, 1) : 0;
+    const widthPerspective = finger.name === 'thumb'
+      ? clamp(1 - thumbYaw * 0.48, 0.54, 1.02)
+      : clamp(1 - Math.abs(tilt) * 0.12, 0.84, 1.04);
+    const heightPerspective = finger.name === 'thumb'
+      ? clamp(1 - Math.abs(tilt) * 0.18 + thumbYaw * 0.06, 0.82, 1.08)
+      : clamp(1 - Math.abs(tilt) * 0.34, 0.84, 1.04);
+    const shear = finger.name === 'thumb'
+      ? -Math.sign(axis.x || 1) * thumbYaw * 0.34 + tilt * 0.08
+      : tilt * 0.13;
+    const rotationBoost = finger.name === 'thumb' ? Math.sign(axis.x || 1) * thumbYaw * 0.16 : 0;
+
+    if (finger.name === 'thumb') {
+      center.x += side.x * profile.baseW * 0.10;
+      center.y += side.y * profile.baseW * 0.10;
+    } else {
+      center.x += side.x * shear * profile.baseW * 0.04;
+      center.y += side.y * shear * profile.baseW * 0.04;
+    }
+
+    const angle = Math.atan2(axis.x, -axis.y) + rotationBoost;
 
     ctx.save();
     ctx.translate(center.x, center.y);
     ctx.rotate(angle);
-    ctx.transform(1 + Math.abs(tilt) * 0.06, tilt * 0.12, 0, foreshorten, 0, 0);
-    drawRealisticNail(ctx, nailWidth, nailLength, settings.shape, settings.color, settings.design, settings.gloss, settings.depth, finger.name);
+    ctx.transform(widthPerspective, 0, shear, heightPerspective, 0, 0);
+    drawRealisticNail(ctx, profile, settings.color, settings.design, settings.gloss, settings.depth, finger.name);
     ctx.restore();
   });
 }
 
-function drawRealisticNail(ctx, w, h, shape, color, design, gloss, depth, fingerName) {
+function getNailProfile(fingerName, shape, bodyWidth, length, fit) {
+  const fitBonus = clamp((fit - 1) * 0.18, -0.04, 0.08);
+  const thumbBoost = fingerName === 'thumb' ? 1.04 : 1;
+  const maxBase = length * (fingerName === 'thumb' ? 0.92 : 0.88);
+
+  let baseRatio = 1.14 + fitBonus;
+  let shoulderRatio = 1.01 + fitBonus * 0.35;
+  let tipRatio = 0.76;
+
+  if (shape === 'square') {
+    baseRatio = 1.12 + fitBonus;
+    shoulderRatio = 1.04 + fitBonus * 0.30;
+    tipRatio = 0.98;
+  } else if (shape === 'almond') {
+    baseRatio = 1.17 + fitBonus;
+    shoulderRatio = 0.98 + fitBonus * 0.25;
+    tipRatio = 0.58;
+  } else if (shape === 'stiletto') {
+    baseRatio = 1.18 + fitBonus;
+    shoulderRatio = 0.88 + fitBonus * 0.20;
+    tipRatio = 0.24;
+  }
+
+  const baseW = clamp(bodyWidth * baseRatio * thumbBoost, length * 0.50, maxBase);
+  const shoulderW = clamp(bodyWidth * shoulderRatio, length * 0.44, baseW * 0.98);
+  const tipW = clamp(baseW * tipRatio, length * 0.12, shape === 'square' ? baseW * 0.98 : baseW * 0.88);
+
+  return { shape, length, baseW, shoulderW, tipW };
+}
+
+function drawRealisticNail(ctx, profile, color, design, gloss, depth, fingerName) {
+  const { length: h, baseW, shoulderW, tipW } = profile;
+  const maxW = Math.max(baseW, shoulderW, tipW);
   const depthStrength = clamp(depth, 0, 1.35);
   const glossStrength = clamp(gloss, 0, 1.25);
 
   ctx.save();
 
-  // Sombra embaixo da base, pequena e macia: prende a unha no dedo sem parecer adesivo flutuante.
+  // Contact shadow under the cuticle/base.
   ctx.save();
-  ctx.globalAlpha = 0.22 + depthStrength * 0.08;
-  const baseShadow = ctx.createRadialGradient(0, h * 0.36, 1, 0, h * 0.38, w * 0.75);
-  baseShadow.addColorStop(0, 'rgba(0,0,0,0.38)');
+  ctx.globalAlpha = 0.20 + depthStrength * 0.08;
+  const baseShadow = ctx.createRadialGradient(0, h * 0.34, 1, 0, h * 0.35, baseW * 0.9);
+  baseShadow.addColorStop(0, 'rgba(0,0,0,0.42)');
+  baseShadow.addColorStop(0.55, 'rgba(0,0,0,0.12)');
   baseShadow.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = baseShadow;
   ctx.beginPath();
-  ctx.ellipse(0, h * 0.36, w * 0.55, h * 0.16, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, h * 0.35, baseW * 0.54, h * 0.17, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  makeNailPath(ctx, w, h, shape);
+  makeNailPath(ctx, profile);
   ctx.clip();
 
-  // Cor principal com variação vertical de esmalte real.
+  // Primary enamel color.
   const vertical = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
   vertical.addColorStop(0, lighten(color, 0.22));
-  vertical.addColorStop(0.16, lighten(color, 0.08));
-  vertical.addColorStop(0.55, color);
-  vertical.addColorStop(0.82, darken(color, 0.08));
+  vertical.addColorStop(0.14, lighten(color, 0.08));
+  vertical.addColorStop(0.58, color);
+  vertical.addColorStop(0.84, darken(color, 0.08));
   vertical.addColorStop(1, darken(color, 0.2));
-  ctx.globalAlpha = 0.965;
+  ctx.globalAlpha = 0.97;
   ctx.fillStyle = vertical;
-  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.fillRect(-maxW, -h / 2, maxW * 2, h);
   ctx.globalAlpha = 1;
 
-  // Curvatura transversal: laterais mais escuras, centro mais claro.
-  const barrel = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
-  barrel.addColorStop(0, `rgba(0,0,0,${0.24 * depthStrength})`);
-  barrel.addColorStop(0.18, `rgba(0,0,0,${0.06 * depthStrength})`);
-  barrel.addColorStop(0.48, `rgba(255,255,255,${0.18 * depthStrength})`);
-  barrel.addColorStop(0.64, `rgba(255,255,255,${0.10 * depthStrength})`);
-  barrel.addColorStop(1, `rgba(0,0,0,${0.26 * depthStrength})`);
+  // Curvature from side to side.
+  const barrel = ctx.createLinearGradient(-baseW / 2, 0, baseW / 2, 0);
+  barrel.addColorStop(0, `rgba(0,0,0,${0.26 * depthStrength})`);
+  barrel.addColorStop(0.17, `rgba(0,0,0,${0.08 * depthStrength})`);
+  barrel.addColorStop(0.50, `rgba(255,255,255,${0.20 * depthStrength})`);
+  barrel.addColorStop(0.73, `rgba(255,255,255,${0.07 * depthStrength})`);
+  barrel.addColorStop(1, `rgba(0,0,0,${0.28 * depthStrength})`);
   ctx.fillStyle = barrel;
-  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.fillRect(-maxW, -h / 2, maxW * 2, h);
 
-  // Luz ambiente e hotspot superior, para parecer esmalte gel.
-  const gelGlow = ctx.createRadialGradient(-w * 0.18, -h * 0.24, 1, -w * 0.18, -h * 0.22, h * 0.68);
-  gelGlow.addColorStop(0, `rgba(255,255,255,${0.30 * glossStrength})`);
-  gelGlow.addColorStop(0.42, `rgba(255,255,255,${0.08 * glossStrength})`);
+  // Dome highlight.
+  const gelGlow = ctx.createRadialGradient(-shoulderW * 0.12, -h * 0.24, 1, -shoulderW * 0.08, -h * 0.18, h * 0.72);
+  gelGlow.addColorStop(0, `rgba(255,255,255,${0.32 * glossStrength})`);
+  gelGlow.addColorStop(0.44, `rgba(255,255,255,${0.09 * glossStrength})`);
   gelGlow.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = gelGlow;
-  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.fillRect(-maxW, -h / 2, maxW * 2, h);
 
-  // Base/cutícula com fade transparente, deixa menos aparência de figurinha colada.
-  const cuticleFade = ctx.createLinearGradient(0, h * 0.22, 0, h / 2);
+  // Blend the base into the skin a bit more.
+  const cuticleFade = ctx.createLinearGradient(0, h * 0.16, 0, h / 2);
   cuticleFade.addColorStop(0, 'rgba(255,255,255,0)');
-  cuticleFade.addColorStop(1, 'rgba(255,255,255,0.18)');
+  cuticleFade.addColorStop(0.48, 'rgba(255,255,255,0.06)');
+  cuticleFade.addColorStop(1, 'rgba(255,255,255,0.17)');
   ctx.fillStyle = cuticleFade;
-  ctx.fillRect(-w / 2, h * 0.18, w, h * 0.36);
+  ctx.fillRect(-maxW, h * 0.12, maxW * 2, h * 0.42);
 
-  drawSpecularStreak(ctx, w, h, glossStrength, fingerName);
+  drawSpecularStreak(ctx, profile, glossStrength, fingerName);
 
-  if (design === 'french') drawFrench(ctx, w, h, shape);
-  if (design === 'glitter') drawGlitter(ctx, w, h);
-  if (design === 'heart') drawHeart(ctx, 0, -h * 0.03, Math.max(4, w * 0.17));
+  if (design === 'french') drawFrench(ctx, profile);
+  if (design === 'glitter') drawGlitter(ctx, baseW, h);
+  if (design === 'heart') drawHeart(ctx, 0, -h * 0.03, Math.max(4, shoulderW * 0.17));
 
   ctx.restore();
 
-  // Contorno fino, com menos branco. Antes a borda clara denunciava o recorte.
-  makeNailPath(ctx, w, h, shape);
-  ctx.lineWidth = Math.max(0.55, w * 0.018);
-  ctx.strokeStyle = `rgba(255,255,255,${0.12 + glossStrength * 0.12})`;
+  makeNailPath(ctx, profile);
+  ctx.lineWidth = Math.max(0.55, baseW * 0.016);
+  ctx.strokeStyle = `rgba(255,255,255,${0.10 + glossStrength * 0.10})`;
   ctx.stroke();
 
-  makeNailPath(ctx, w * 0.96, h * 0.975, shape);
-  ctx.lineWidth = Math.max(0.45, w * 0.014);
-  ctx.strokeStyle = `rgba(0,0,0,${0.10 * depthStrength})`;
+  makeNailPath(ctx, {
+    ...profile,
+    baseW: baseW * 0.96,
+    shoulderW: shoulderW * 0.97,
+    tipW: tipW * 0.96,
+    length: h * 0.978
+  });
+  ctx.lineWidth = Math.max(0.45, baseW * 0.011);
+  ctx.strokeStyle = `rgba(0,0,0,${0.12 * depthStrength})`;
   ctx.stroke();
 
-  // Linha sutil de cutícula na base.
+  // Subtle cuticle arc.
   ctx.beginPath();
-  ctx.ellipse(0, h * 0.39, w * 0.31, h * 0.055, 0, Math.PI * 0.08, Math.PI * 0.92);
-  ctx.strokeStyle = `rgba(255,255,255,${0.16 * glossStrength})`;
-  ctx.lineWidth = Math.max(0.35, w * 0.01);
+  ctx.ellipse(0, h * 0.385, baseW * 0.30, h * 0.052, 0, Math.PI * 0.07, Math.PI * 0.93);
+  ctx.strokeStyle = `rgba(255,255,255,${0.14 * glossStrength})`;
+  ctx.lineWidth = Math.max(0.35, baseW * 0.008);
   ctx.stroke();
+
+  // A touch of underside shadow under the free edge for 3D depth.
+  ctx.beginPath();
+  ctx.ellipse(0, -h * 0.43, Math.max(2, tipW * 0.34), Math.max(1.2, h * 0.028), 0, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(0,0,0,${0.10 * depthStrength})`;
+  ctx.fill();
 
   ctx.restore();
 }
 
-function drawSpecularStreak(ctx, w, h, strength, fingerName) {
+function drawSpecularStreak(ctx, profile, strength, fingerName) {
   if (strength <= 0.05) return;
+  const { length: h, shoulderW, baseW } = profile;
+  const xShift = fingerName === 'thumb' ? -shoulderW * 0.03 : -shoulderW * 0.13;
 
-  const xShift = fingerName === 'thumb' ? -w * 0.03 : -w * 0.13;
   ctx.save();
   ctx.translate(xShift, -h * 0.11);
   ctx.rotate(-0.18);
 
-  const gloss = ctx.createLinearGradient(-w * 0.08, -h * 0.36, w * 0.16, h * 0.32);
+  const gloss = ctx.createLinearGradient(-shoulderW * 0.08, -h * 0.36, shoulderW * 0.16, h * 0.32);
   gloss.addColorStop(0, 'rgba(255,255,255,0)');
-  gloss.addColorStop(0.22, `rgba(255,255,255,${0.42 * strength})`);
-  gloss.addColorStop(0.46, `rgba(255,255,255,${0.15 * strength})`);
+  gloss.addColorStop(0.20, `rgba(255,255,255,${0.46 * strength})`);
+  gloss.addColorStop(0.45, `rgba(255,255,255,${0.16 * strength})`);
   gloss.addColorStop(1, 'rgba(255,255,255,0)');
 
   ctx.beginPath();
-  ctx.ellipse(0, 0, Math.max(2.1, w * 0.085), Math.max(7, h * 0.39), 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, Math.max(2.1, shoulderW * 0.10), Math.max(7, h * 0.40), 0, 0, Math.PI * 2);
   ctx.fillStyle = gloss;
   ctx.fill();
 
   ctx.beginPath();
-  ctx.ellipse(w * 0.15, -h * 0.24, Math.max(1.2, w * 0.04), Math.max(3.5, h * 0.14), 0.08, 0, Math.PI * 2);
+  ctx.ellipse(baseW * 0.09, -h * 0.25, Math.max(1.1, shoulderW * 0.045), Math.max(3.5, h * 0.15), 0.08, 0, Math.PI * 2);
   ctx.fillStyle = `rgba(255,255,255,${0.32 * strength})`;
   ctx.fill();
   ctx.restore();
 }
 
-function makeNailPath(ctx, w, h, shape) {
+function makeNailPath(ctx, profile) {
+  const { shape, length: h, baseW, shoulderW, tipW } = profile;
+  const baseHalf = baseW / 2;
+  const shoulderHalf = shoulderW / 2;
+  const tipHalf = Math.max(1.6, tipW / 2);
+
   ctx.beginPath();
 
   if (shape === 'square') {
-    roundedRect(ctx, -w / 2, -h / 2, w, h, Math.max(4, w * 0.24));
-  } else if (shape === 'stiletto') {
-    ctx.moveTo(0, -h / 2);
-    ctx.bezierCurveTo(w * 0.58, -h * 0.26, w * 0.5, h * 0.32, w * 0.18, h / 2);
-    ctx.bezierCurveTo(w * 0.05, h * 0.56, -w * 0.05, h * 0.56, -w * 0.18, h / 2);
-    ctx.bezierCurveTo(-w * 0.5, h * 0.32, -w * 0.58, -h * 0.26, 0, -h / 2);
+    ctx.moveTo(-tipHalf, -h * 0.48);
+    ctx.quadraticCurveTo(0, -h * 0.56, tipHalf, -h * 0.48);
+    ctx.lineTo(shoulderHalf, h * 0.12);
+    ctx.quadraticCurveTo(baseHalf * 1.03, h * 0.28, baseHalf * 0.76, h * 0.47);
+    ctx.quadraticCurveTo(baseHalf * 0.28, h * 0.54, 0, h * 0.5);
+    ctx.quadraticCurveTo(-baseHalf * 0.28, h * 0.54, -baseHalf * 0.76, h * 0.47);
+    ctx.quadraticCurveTo(-baseHalf * 1.03, h * 0.28, -shoulderHalf, h * 0.12);
     ctx.closePath();
-  } else if (shape === 'almond') {
-    ctx.moveTo(0, -h / 2);
-    ctx.bezierCurveTo(w * 0.55, -h * 0.2, w * 0.48, h * 0.34, w * 0.12, h / 2);
-    ctx.bezierCurveTo(w * 0.04, h * 0.54, -w * 0.04, h * 0.54, -w * 0.12, h / 2);
-    ctx.bezierCurveTo(-w * 0.48, h * 0.34, -w * 0.55, -h * 0.2, 0, -h / 2);
-    ctx.closePath();
-  } else {
-    ctx.moveTo(0, -h / 2);
-    ctx.bezierCurveTo(w * 0.45, -h * 0.48, w * 0.56, -h * 0.1, w * 0.45, h * 0.26);
-    ctx.bezierCurveTo(w * 0.34, h * 0.5, -w * 0.34, h * 0.5, -w * 0.45, h * 0.26);
-    ctx.bezierCurveTo(-w * 0.56, -h * 0.1, -w * 0.45, -h * 0.48, 0, -h / 2);
-    ctx.closePath();
+    return;
   }
+
+  if (shape === 'stiletto') {
+    ctx.moveTo(0, -h * 0.52);
+    ctx.bezierCurveTo(tipHalf * 1.6, -h * 0.34, shoulderHalf * 0.98, -h * 0.08, shoulderHalf, h * 0.14);
+    ctx.bezierCurveTo(baseHalf * 0.97, h * 0.32, baseHalf * 0.58, h * 0.49, 0, h * 0.5);
+    ctx.bezierCurveTo(-baseHalf * 0.58, h * 0.49, -baseHalf * 0.97, h * 0.32, -shoulderHalf, h * 0.14);
+    ctx.bezierCurveTo(-shoulderHalf * 0.98, -h * 0.08, -tipHalf * 1.6, -h * 0.34, 0, -h * 0.52);
+    ctx.closePath();
+    return;
+  }
+
+  if (shape === 'almond') {
+    ctx.moveTo(0, -h * 0.50);
+    ctx.bezierCurveTo(tipHalf * 1.45, -h * 0.40, shoulderHalf * 1.04, -h * 0.04, shoulderHalf * 0.98, h * 0.18);
+    ctx.bezierCurveTo(baseHalf * 0.95, h * 0.35, baseHalf * 0.56, h * 0.49, 0, h * 0.5);
+    ctx.bezierCurveTo(-baseHalf * 0.56, h * 0.49, -baseHalf * 0.95, h * 0.35, -shoulderHalf * 0.98, h * 0.18);
+    ctx.bezierCurveTo(-shoulderHalf * 1.04, -h * 0.04, -tipHalf * 1.45, -h * 0.40, 0, -h * 0.50);
+    ctx.closePath();
+    return;
+  }
+
+  // oval
+  ctx.moveTo(0, -h * 0.49);
+  ctx.bezierCurveTo(tipHalf * 1.55, -h * 0.46, shoulderHalf * 1.08, -h * 0.03, shoulderHalf, h * 0.17);
+  ctx.bezierCurveTo(baseHalf * 0.96, h * 0.35, baseHalf * 0.54, h * 0.50, 0, h * 0.5);
+  ctx.bezierCurveTo(-baseHalf * 0.54, h * 0.50, -baseHalf * 0.96, h * 0.35, -shoulderHalf, h * 0.17);
+  ctx.bezierCurveTo(-shoulderHalf * 1.08, -h * 0.03, -tipHalf * 1.55, -h * 0.46, 0, -h * 0.49);
+  ctx.closePath();
 }
 
-function drawGloss(ctx, w, h, strength, fingerName) {
-  if (strength <= 0.05) return;
-
-  const xShift = fingerName === 'thumb' ? -w * 0.02 : -w * 0.14;
+function drawFrench(ctx, profile) {
+  const { length: h, shoulderW, tipW } = profile;
   ctx.save();
-  ctx.translate(xShift, -h * 0.08);
-  ctx.rotate(-0.18);
-
-  const gloss = ctx.createLinearGradient(-w * 0.1, -h * 0.35, w * 0.18, h * 0.34);
-  gloss.addColorStop(0, 'rgba(255,255,255,0)');
-  gloss.addColorStop(0.22, `rgba(255,255,255,${0.38 * strength})`);
-  gloss.addColorStop(0.52, `rgba(255,255,255,${0.12 * strength})`);
-  gloss.addColorStop(1, 'rgba(255,255,255,0)');
-
-  ctx.beginPath();
-  ctx.ellipse(0, 0, Math.max(2.5, w * 0.105), Math.max(8, h * 0.42), 0, 0, Math.PI * 2);
-  ctx.fillStyle = gloss;
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.ellipse(w * 0.16, -h * 0.22, Math.max(1.3, w * 0.045), Math.max(4, h * 0.16), 0.08, 0, Math.PI * 2);
-  ctx.fillStyle = `rgba(255,255,255,${0.28 * strength})`;
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawFrench(ctx, w, h, shape) {
-  ctx.save();
-  makeNailPath(ctx, w, h, shape);
+  makeNailPath(ctx, profile);
   ctx.clip();
 
   ctx.beginPath();
-  ctx.ellipse(0, -h * 0.39, w * 0.52, h * 0.18, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.ellipse(0, -h * 0.39, Math.max(tipW * 0.65, shoulderW * 0.42), h * 0.18, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.93)';
   ctx.fill();
 
   ctx.beginPath();
-  ctx.ellipse(0, -h * 0.29, w * 0.44, h * 0.1, 0, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,0.36)';
-  ctx.lineWidth = Math.max(0.6, w * 0.025);
+  ctx.ellipse(0, -h * 0.29, Math.max(tipW * 0.52, shoulderW * 0.34), h * 0.10, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = Math.max(0.6, shoulderW * 0.025);
   ctx.stroke();
   ctx.restore();
 }
@@ -590,15 +658,6 @@ function drawGlitter(ctx, w, h) {
     ctx.fillStyle = `rgba(255,255,255,${dot.a})`;
     ctx.fill();
   });
-}
-
-function roundedRect(ctx, x, y, w, h, r) {
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
 }
 
 function drawHeart(ctx, x, y, size) {
