@@ -38,11 +38,11 @@ const DESIGNS = [
 const FINGERS = [
   // calibragem mais realista: a unha fica presa entre o DIP e a ponta do dedo.
   // widthRatio usa a largura estimada do dedo; lengthRatio usa a falange distal real.
-  { name: 'thumb', label: 'Polegar', tip: 4, dip: 3, pip: 2, mcp: 1, widthRatio: 0.66, lengthRatio: 0.72, forward: 0.03, base: 0.42, min: 0.11, max: 0.31 },
-  { name: 'index', label: 'Indicador', tip: 8, dip: 7, pip: 6, mcp: 5, widthRatio: 0.52, lengthRatio: 0.68, forward: 0.025, base: 0.40, min: 0.10, max: 0.29 },
-  { name: 'middle', label: 'Médio', tip: 12, dip: 11, pip: 10, mcp: 9, widthRatio: 0.54, lengthRatio: 0.69, forward: 0.025, base: 0.40, min: 0.10, max: 0.30 },
-  { name: 'ring', label: 'Anelar', tip: 16, dip: 15, pip: 14, mcp: 13, widthRatio: 0.51, lengthRatio: 0.67, forward: 0.025, base: 0.40, min: 0.095, max: 0.28 },
-  { name: 'pinky', label: 'Mindinho', tip: 20, dip: 19, pip: 18, mcp: 17, widthRatio: 0.46, lengthRatio: 0.62, forward: 0.02, base: 0.39, min: 0.08, max: 0.24 }
+  { name: 'thumb', label: 'Polegar', tip: 4, dip: 3, pip: 2, mcp: 1, widthRatio: 0.72, lengthRatio: 0.82, forward: 0.05, base: 0.42, min: 0.13, max: 0.36 },
+  { name: 'index', label: 'Indicador', tip: 8, dip: 7, pip: 6, mcp: 5, widthRatio: 0.58, lengthRatio: 0.78, forward: 0.06, base: 0.40, min: 0.12, max: 0.34 },
+  { name: 'middle', label: 'Médio', tip: 12, dip: 11, pip: 10, mcp: 9, widthRatio: 0.60, lengthRatio: 0.80, forward: 0.06, base: 0.40, min: 0.12, max: 0.35 },
+  { name: 'ring', label: 'Anelar', tip: 16, dip: 15, pip: 14, mcp: 13, widthRatio: 0.57, lengthRatio: 0.77, forward: 0.06, base: 0.40, min: 0.11, max: 0.33 },
+  { name: 'pinky', label: 'Mindinho', tip: 20, dip: 19, pip: 18, mcp: 17, widthRatio: 0.52, lengthRatio: 0.72, forward: 0.05, base: 0.39, min: 0.095, max: 0.29 }
 ];
 
 const GLITTER_POINTS = Array.from({ length: 18 }, (_, index) => ({
@@ -52,6 +52,28 @@ const GLITTER_POINTS = Array.from({ length: 18 }, (_, index) => ({
   a: 0.45 + pseudoRandom(index * 13 + 4) * 0.45
 }));
 
+const FINGER_TWEAKS_STORAGE_KEY = 'nail_ar_finger_tweaks_v3';
+const DEFAULT_FINGER_TWEAK = { side: 0, along: 0, width: 1, length: 1, rotate: 0 };
+
+function buildDefaultFingerTweaks() {
+  return Object.fromEntries(FINGERS.map((finger) => [finger.name, { ...DEFAULT_FINGER_TWEAK }]));
+}
+
+function loadFingerTweaks() {
+  if (typeof window === 'undefined') return buildDefaultFingerTweaks();
+  try {
+    const raw = window.localStorage.getItem(FINGER_TWEAKS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const defaults = buildDefaultFingerTweaks();
+    FINGERS.forEach((finger) => {
+      defaults[finger.name] = { ...DEFAULT_FINGER_TWEAK, ...(parsed[finger.name] || {}) };
+    });
+    return defaults;
+  } catch (error) {
+    return buildDefaultFingerTweaks();
+  }
+}
+
 function App() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -60,7 +82,7 @@ function App() {
   const lastVideoTimeRef = useRef(-1);
   const smoothedLandmarksRef = useRef(null);
   const statusRef = useRef({ text: '', at: 0 });
-  const settingsRef = useRef({ color: COLORS[1].value, shape: 'oval', design: 'solid', scale: 0.92, fit: 0.88, gloss: 0.78, depth: 1.05 });
+  const settingsRef = useRef({ color: COLORS[1].value, shape: 'oval', design: 'solid', scale: 0.92, fit: 0.88, gloss: 0.78, depth: 1.05, fingerTweaks: buildDefaultFingerTweaks() });
 
   const [status, setStatus] = useState('Carregando IA da câmera...');
   const [cameraOn, setCameraOn] = useState(false);
@@ -73,13 +95,25 @@ function App() {
   const [depth, setDepth] = useState(1.05);
   const [facingMode, setFacingMode] = useState('environment');
   const [photoUrl, setPhotoUrl] = useState(null);
+  const [calibrationFinger, setCalibrationFinger] = useState('thumb');
+  const [fingerTweaks, setFingerTweaks] = useState(() => loadFingerTweaks());
 
   const selectedShape = useMemo(() => SHAPES.find((item) => item.id === shape), [shape]);
   const selectedDesign = useMemo(() => DESIGNS.find((item) => item.id === design), [design]);
+  const activeFingerTweak = fingerTweaks[calibrationFinger] || DEFAULT_FINGER_TWEAK;
+  const selectedFingerLabel = FINGERS.find((finger) => finger.name === calibrationFinger)?.label || 'Dedo';
 
   useEffect(() => {
-    settingsRef.current = { color: selectedColor.value, shape, design, scale, fit, gloss, depth };
-  }, [selectedColor, shape, design, scale, fit, gloss, depth]);
+    settingsRef.current = { color: selectedColor.value, shape, design, scale, fit, gloss, depth, fingerTweaks };
+  }, [selectedColor, shape, design, scale, fit, gloss, depth, fingerTweaks]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FINGER_TWEAKS_STORAGE_KEY, JSON.stringify(fingerTweaks));
+    } catch (error) {
+      // ignore persistence errors
+    }
+  }, [fingerTweaks]);
 
   useEffect(() => {
     let mounted = true;
@@ -233,6 +267,27 @@ function App() {
     setPhotoUrl(out.toDataURL('image/png'));
   }
 
+  function updateFingerTweak(key, value) {
+    setFingerTweaks((previous) => ({
+      ...previous,
+      [calibrationFinger]: {
+        ...(previous[calibrationFinger] || DEFAULT_FINGER_TWEAK),
+        [key]: value
+      }
+    }));
+  }
+
+  function resetCurrentFinger() {
+    setFingerTweaks((previous) => ({
+      ...previous,
+      [calibrationFinger]: { ...DEFAULT_FINGER_TWEAK }
+    }));
+  }
+
+  function resetAllFingerTweaks() {
+    setFingerTweaks(buildDefaultFingerTweaks());
+  }
+
   const whatsappText = encodeURIComponent(
     `Olá! Gostei do modelo: cor ${selectedColor.name}, formato ${selectedShape?.label}, desenho ${selectedDesign?.label}. Quero agendar.`
   );
@@ -315,6 +370,36 @@ function App() {
           <label>3D <strong>{Math.round(depth * 100)}%</strong></label>
           <input type="range" min="0.1" max="1.25" step="0.01" value={depth} onChange={(event) => setDepth(Number(event.target.value))} />
         </div>
+        <div className="panel sliders-panel calibration-panel">
+          <h2>Calibração por dedo</h2>
+          <p className="help-text">Quando faltar pouco para encaixar 100%, ajuste o dedo ativo. Isso ajuda muito em poses inclinadas ou mão fechada.</p>
+          <div className="chips">
+            {FINGERS.map((finger) => (
+              <button
+                key={finger.name}
+                onClick={() => setCalibrationFinger(finger.name)}
+                className={calibrationFinger === finger.name ? 'chip active' : 'chip'}
+              >
+                {finger.label}
+              </button>
+            ))}
+          </div>
+          <strong className="calibration-title">Ajustando: {selectedFingerLabel}</strong>
+          <label>Lado <strong>{Math.round(activeFingerTweak.side * 100)}%</strong></label>
+          <input type="range" min="-0.45" max="0.45" step="0.01" value={activeFingerTweak.side} onChange={(event) => updateFingerTweak('side', Number(event.target.value))} />
+          <label>Frente / trás <strong>{Math.round(activeFingerTweak.along * 100)}%</strong></label>
+          <input type="range" min="-0.45" max="0.35" step="0.01" value={activeFingerTweak.along} onChange={(event) => updateFingerTweak('along', Number(event.target.value))} />
+          <label>Largura <strong>{Math.round(activeFingerTweak.width * 100)}%</strong></label>
+          <input type="range" min="0.72" max="1.30" step="0.01" value={activeFingerTweak.width} onChange={(event) => updateFingerTweak('width', Number(event.target.value))} />
+          <label>Comprimento <strong>{Math.round(activeFingerTweak.length * 100)}%</strong></label>
+          <input type="range" min="0.70" max="1.25" step="0.01" value={activeFingerTweak.length} onChange={(event) => updateFingerTweak('length', Number(event.target.value))} />
+          <label>Rotação <strong>{Math.round(activeFingerTweak.rotate * 57.2958)}°</strong></label>
+          <input type="range" min="-0.45" max="0.45" step="0.01" value={activeFingerTweak.rotate} onChange={(event) => updateFingerTweak('rotate', Number(event.target.value))} />
+          <div className="tweak-actions">
+            <button onClick={resetCurrentFinger}>Resetar dedo</button>
+            <button onClick={resetAllFingerTweaks}>Resetar tudo</button>
+          </div>
+        </div>
       </section>
 
       {photoUrl && (
@@ -342,75 +427,69 @@ function drawNails(ctx, landmarks, width, height, settings) {
     const dip = points[finger.dip];
     const pip = points[finger.pip];
     const mcp = points[finger.mcp];
+    const tweak = settings.fingerTweaks?.[finger.name] || DEFAULT_FINGER_TWEAK;
 
     const distalAxis = normalize({ x: tip.x - dip.x, y: tip.y - dip.y });
     const longAxis = normalize({ x: tip.x - pip.x, y: tip.y - pip.y });
-    const axis = normalize({ x: distalAxis.x * 0.78 + longAxis.x * 0.22, y: distalAxis.y * 0.78 + longAxis.y * 0.22 });
+    const axis = normalize({ x: distalAxis.x * 0.82 + longAxis.x * 0.18, y: distalAxis.y * 0.82 + longAxis.y * 0.18 });
     const side = { x: -axis.y, y: axis.x };
 
     const distalLen = Math.max(distance(tip, dip), palmSize * 0.095);
     const midLen = Math.max(distance(dip, pip), palmSize * 0.1);
     const proximalLen = Math.max(distance(pip, mcp), palmSize * 0.1);
-    const fingerLen = Math.max(distance(tip, mcp), palmSize * 0.22);
 
-    // Width estimate: blend distal and proximal info so the base doesn't get unnaturally thin.
-    const widthFromDistal = midLen * 0.48;
-    const widthFromProximal = proximalLen * 0.34;
-    const widthFromPalm = palmSize * finger.widthRatio * 0.20;
-    const rawFingerWidth = widthFromDistal * 0.46 + widthFromProximal * 0.22 + widthFromPalm * 0.32;
+    const curl = getFingerCurl(points, finger);
+    const widthFromDistal = midLen * 0.52;
+    const widthFromProximal = proximalLen * 0.39;
+    const widthFromPalm = palmSize * finger.widthRatio * 0.21;
+    const rawFingerWidth = widthFromDistal * 0.40 + widthFromProximal * 0.23 + widthFromPalm * 0.37;
 
     const nailLength = clamp(
-      distalLen * finger.lengthRatio * settings.scale,
+      distalLen * finger.lengthRatio * settings.scale * tweak.length,
       palmSize * finger.min,
       palmSize * finger.max
     );
 
+    const visibleLength = nailLength * mix(0.96, 0.86, curl);
     const bodyWidth = clamp(
-      rawFingerWidth * settings.fit,
-      nailLength * 0.44,
-      nailLength * 0.76
+      rawFingerWidth * settings.fit * tweak.width * mix(1.0, 1.04, curl),
+      visibleLength * 0.44,
+      visibleLength * 0.88
     );
 
-    const profile = getNailProfile(finger.name, settings.shape, bodyWidth, nailLength, settings.fit);
+    const profile = getNailProfile(finger.name, settings.shape, bodyWidth, visibleLength, settings.fit);
 
-    // Anchor the nail by the cuticle instead of the center. This keeps the base sitting inside the finger better.
-    const cuticleAnchor = {
-      x: tip.x - axis.x * nailLength * 0.54 + axis.x * nailLength * finger.forward,
-      y: tip.y - axis.y * nailLength * 0.54 + axis.y * nailLength * finger.forward
-    };
-
+    const centerFactor = finger.name === 'thumb' ? mix(0.50, 0.42, curl) : mix(0.56, 0.48, curl);
     let center = {
-      x: cuticleAnchor.x - axis.x * (nailLength * 0.04),
-      y: cuticleAnchor.y - axis.y * (nailLength * 0.04)
+      x: tip.x - axis.x * visibleLength * centerFactor,
+      y: tip.y - axis.y * visibleLength * centerFactor
     };
 
     const zTip = landmarks[finger.tip]?.z || 0;
     const zDip = landmarks[finger.dip]?.z || 0;
     const zPip = landmarks[finger.pip]?.z || 0;
-    const tilt = clamp((zDip - zTip) * 8 + (zPip - zDip) * 2.5, -0.42, 0.42);
+    const tilt = clamp((zDip - zTip) * 8 + (zPip - zDip) * 2.5, -0.45, 0.45);
 
-    // Thumb needs much stronger perspective correction because it often points sideways.
-    const thumbYaw = finger.name === 'thumb' ? clamp(Math.abs(axis.x) * 1.08 + Math.abs(tilt) * 0.8, 0, 1) : 0;
+    const thumbYaw = finger.name === 'thumb' ? clamp(Math.abs(axis.x) * 1.12 + Math.abs(tilt) * 0.9, 0, 1) : 0;
     const widthPerspective = finger.name === 'thumb'
-      ? clamp(1 - thumbYaw * 0.58, 0.46, 1.02)
-      : clamp(1 - Math.abs(tilt) * 0.12, 0.84, 1.04);
+      ? clamp(1 - thumbYaw * 0.52, 0.50, 1.02)
+      : clamp(1 - Math.abs(tilt) * 0.14 - curl * 0.05, 0.80, 1.04);
     const heightPerspective = finger.name === 'thumb'
-      ? clamp(1 - Math.abs(tilt) * 0.18 + thumbYaw * 0.06, 0.82, 1.08)
-      : clamp(1 - Math.abs(tilt) * 0.34, 0.84, 1.04);
+      ? clamp(1 - Math.abs(tilt) * 0.15 + thumbYaw * 0.08, 0.82, 1.08)
+      : clamp(1 - Math.abs(tilt) * 0.36, 0.84, 1.04);
     const shear = finger.name === 'thumb'
-      ? -Math.sign(axis.x || 1) * thumbYaw * 0.48 + tilt * 0.10
-      : tilt * 0.13;
-    const rotationBoost = finger.name === 'thumb' ? Math.sign(axis.x || 1) * thumbYaw * 0.25 : 0;
+      ? -Math.sign(axis.x || 1) * thumbYaw * 0.36 + tilt * 0.08
+      : tilt * 0.14;
+    const rotationBoost = finger.name === 'thumb' ? Math.sign(axis.x || 1) * thumbYaw * 0.18 : 0;
 
-    if (finger.name === 'thumb') {
-      center.x += side.x * profile.baseW * 0.10;
-      center.y += side.y * profile.baseW * 0.10;
-    } else {
-      center.x += side.x * shear * profile.baseW * 0.04;
-      center.y += side.y * shear * profile.baseW * 0.04;
-    }
+    center.x += side.x * (profile.baseW * (finger.name === 'thumb' ? 0.08 : 0.02));
+    center.y += side.y * (profile.baseW * (finger.name === 'thumb' ? 0.08 : 0.02));
 
-    const angle = Math.atan2(axis.x, -axis.y) + rotationBoost;
+    // Per-finger calibration: lets you nudge exact fit when MediaPipe alone isn't enough.
+    center.x += side.x * (profile.baseW * tweak.side) + axis.x * (visibleLength * tweak.along);
+    center.y += side.y * (profile.baseW * tweak.side) + axis.y * (visibleLength * tweak.along);
+
+    const angle = Math.atan2(axis.x, -axis.y) + rotationBoost + tweak.rotate;
 
     ctx.save();
     ctx.translate(center.x, center.y);
@@ -421,32 +500,41 @@ function drawNails(ctx, landmarks, width, height, settings) {
   });
 }
 
-function getNailProfile(fingerName, shape, bodyWidth, length, fit) {
-  const fitBonus = clamp((fit - 1) * 0.18, -0.04, 0.08);
-  const thumbBoost = fingerName === 'thumb' ? 1.04 : 1;
-  const maxBase = length * (fingerName === 'thumb' ? 0.92 : 0.88);
+function getFingerCurl(points, finger) {
+  const tip = points[finger.tip];
+  const dip = points[finger.dip];
+  const pip = points[finger.pip];
+  const a = normalize({ x: tip.x - dip.x, y: tip.y - dip.y });
+  const b = normalize({ x: dip.x - pip.x, y: dip.y - pip.y });
+  return clamp((1 - dot(a, b)) * 0.5, 0, 1);
+}
 
-  let baseRatio = 1.02 + fitBonus;
-  let shoulderRatio = 1.06 + fitBonus * 0.30;
+function getNailProfile(fingerName, shape, bodyWidth, length, fit) {
+  const fitBonus = clamp((fit - 1) * 0.14, -0.05, 0.06);
+  const thumbBoost = fingerName === 'thumb' ? 1.02 : 1;
+  const maxBase = length * (fingerName === 'thumb' ? 0.90 : 0.86);
+
+  let baseRatio = 1.06 + fitBonus;
+  let shoulderRatio = 0.94 + fitBonus * 0.35;
   let tipRatio = 0.72;
 
   if (shape === 'square') {
-    baseRatio = 1.00 + fitBonus;
-    shoulderRatio = 1.05 + fitBonus * 0.25;
-    tipRatio = 0.92;
-  } else if (shape === 'almond') {
-    baseRatio = 1.03 + fitBonus;
-    shoulderRatio = 1.03 + fitBonus * 0.22;
-    tipRatio = 0.52;
-  } else if (shape === 'stiletto') {
     baseRatio = 1.04 + fitBonus;
-    shoulderRatio = 0.92 + fitBonus * 0.18;
-    tipRatio = 0.20;
+    shoulderRatio = 0.98 + fitBonus * 0.28;
+    tipRatio = 0.94;
+  } else if (shape === 'almond') {
+    baseRatio = 1.09 + fitBonus;
+    shoulderRatio = 0.92 + fitBonus * 0.25;
+    tipRatio = 0.56;
+  } else if (shape === 'stiletto') {
+    baseRatio = 1.08 + fitBonus;
+    shoulderRatio = 0.82 + fitBonus * 0.20;
+    tipRatio = 0.22;
   }
 
-  const baseW = clamp(bodyWidth * baseRatio * thumbBoost, length * 0.44, maxBase);
-  const shoulderW = clamp(bodyWidth * shoulderRatio, length * 0.42, baseW * 1.10);
-  const tipW = clamp(baseW * tipRatio, length * 0.12, shape === 'square' ? baseW * 0.98 : baseW * 0.88);
+  const baseW = clamp(bodyWidth * baseRatio * thumbBoost, length * 0.46, maxBase);
+  const shoulderW = clamp(bodyWidth * shoulderRatio, length * 0.40, baseW * 0.97);
+  const tipW = clamp(baseW * tipRatio, length * 0.11, shape === 'square' ? baseW * 0.95 : baseW * 0.84);
 
   return { shape, length, baseW, shoulderW, tipW };
 }
@@ -483,7 +571,7 @@ function drawRealisticNail(ctx, profile, color, design, gloss, depth, fingerName
   vertical.addColorStop(0.58, color);
   vertical.addColorStop(0.84, darken(color, 0.08));
   vertical.addColorStop(1, darken(color, 0.2));
-  ctx.globalAlpha = 0.90;
+  ctx.globalAlpha = 0.97;
   ctx.fillStyle = vertical;
   ctx.fillRect(-maxW, -h / 2, maxW * 2, h);
   ctx.globalAlpha = 1;
@@ -509,8 +597,8 @@ function drawRealisticNail(ctx, profile, color, design, gloss, depth, fingerName
   // Blend the base into the skin a bit more.
   const cuticleFade = ctx.createLinearGradient(0, h * 0.16, 0, h / 2);
   cuticleFade.addColorStop(0, 'rgba(255,255,255,0)');
-  cuticleFade.addColorStop(0.36, 'rgba(255,255,255,0.035)');
-  cuticleFade.addColorStop(1, 'rgba(255,255,255,0.10)');
+  cuticleFade.addColorStop(0.48, 'rgba(255,255,255,0.06)');
+  cuticleFade.addColorStop(1, 'rgba(255,255,255,0.17)');
   ctx.fillStyle = cuticleFade;
   ctx.fillRect(-maxW, h * 0.12, maxW * 2, h * 0.42);
 
@@ -692,6 +780,14 @@ function distance(a, b) {
 function normalize(vector) {
   const len = Math.hypot(vector.x, vector.y) || 1;
   return { x: vector.x / len, y: vector.y / len };
+}
+
+function dot(a, b) {
+  return a.x * b.x + a.y * b.y;
+}
+
+function mix(a, b, t) {
+  return a + (b - a) * t;
 }
 
 function clamp(value, min, max) {
